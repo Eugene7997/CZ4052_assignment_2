@@ -19,6 +19,9 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 
+# import sys
+# np.set_printoptions(threshold=sys.maxsize)
+
 # # Proof of convergence with Example from lecture notes 7 page 53
 # ![image.png](attachment:image.png)
 
@@ -64,6 +67,9 @@ def page_rank_simplified(adjacency_matrix, max_iterations=1000):
             break
 
         page_rank_scores = new_page_rank_scores
+
+        if np.isnan(new_page_rank_scores).any():
+            print(f"iteration:{_}")
 
     return page_rank_scores
 
@@ -176,5 +182,67 @@ print(b.sum().round(2))
 # https://www.limfinity.com/ir/
 #
 # https://snap.stanford.edu/data/web-Google.html
+
+# +
+import numpy as np
+
+
+def parse_dataset(file_path):
+    nodes = set()
+    edges = []
+
+    with open(file_path, "r") as file:
+        for line in file:
+            parts = line.split()
+            if parts[0] == "n":
+                nodes.add(int(parts[1]))
+            elif parts[0] == "e":
+                edges.append((int(parts[1]), int(parts[2])))
+
+    return nodes, edges
+
+
+def create_adjacency_matrix(nodes, edges):
+    num_nodes = max(nodes) + 1
+    adjacency_matrix = np.zeros((num_nodes, num_nodes))
+
+    for edge in edges:
+        adjacency_matrix[edge[0]][edge[1]] = 1
+
+    for i in range(len(adjacency_matrix)):
+        row = adjacency_matrix[i]
+        row_sum = sum(row)
+
+        for j in range(len(row)):
+            # Avoid division by zero
+            if row_sum != 0:
+                adjacency_matrix[i][j] = row[j] / row_sum
+            else:
+                adjacency_matrix[i][j] = 0.0
+
+    return adjacency_matrix
+
+
+# -
+
+file_path = "./datasets/gr0.epa_sample.txt"  # Replace with the actual path to your dataset
+nodes, edges = parse_dataset(file_path)
+adjacency_matrix = create_adjacency_matrix(nodes, edges)
+
+# +
+G = nx.from_numpy_array(adjacency_matrix, create_using=nx.DiGraph)
+
+fig, ax = plt.subplots()
+pos = nx.spring_layout(G, seed=5)
+nx.draw_networkx_nodes(G, pos, ax=ax)
+nx.draw_networkx_labels(G, pos, ax=ax)
+nx.draw_networkx_edges(G, pos, ax=ax, connectionstyle=f"arc3, rad = {0.25}")
+plt.title("Graph with Edge Labels")
+plt.show()
+# -
+
+b = page_rank_random_surfer_model(adjacency_matrix, 0.15)
+print(f"closed form 1: {b.round(2)}")
+print(f"closed form 2: {b.sum().round(2)}")
 
 # # PageRank with parallel programming
