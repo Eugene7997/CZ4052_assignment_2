@@ -22,6 +22,28 @@ import numpy as np
 # import sys
 # np.set_printoptions(threshold=sys.maxsize)
 
+# # utility functions
+
+
+def write_to_file(filename, data):
+    with open(filename, "w") as file:
+        for element in data:
+            file.write(f"{element}\n")
+
+
+def plot_the_scores(plot_values):
+    """
+    For plotting the utilities of the grid through the iteration of the agent's algorithm.
+    """
+    plt.plot(plot_values, label=f"Scores")
+
+    plt.xlabel("Iterations")
+    plt.ylabel("Utilities")
+    plt.title("Utilities against Iterations for Each Position")
+    plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+    plt.show()
+
+
 # # Proof of convergence with Example from lecture notes 7 page 53
 # ![image.png](attachment:image.png)
 
@@ -50,6 +72,9 @@ plt.show()
 
 
 def page_rank_simplified(adjacency_matrix, max_iterations=1000):
+    # For plotting purposes
+    plot_scores = []
+
     # Initialize the PageRank scores with equal probabilities (random surfers)
     number_of_nodes = adjacency_matrix.shape[0]
     page_rank_scores = np.ones(number_of_nodes) / number_of_nodes
@@ -66,25 +91,34 @@ def page_rank_simplified(adjacency_matrix, max_iterations=1000):
             print(f"convergence reached")
             break
 
+        # For plotting
+        plot_scores.append(page_rank_scores.round(4).tolist())
+
         page_rank_scores = new_page_rank_scores
 
         if np.isnan(new_page_rank_scores).any():
             print(f"iteration:{_}")
 
-    return page_rank_scores
+    return page_rank_scores, plot_scores
 
 
-b = page_rank_simplified(a)
+b, plot_scores = page_rank_simplified(a)
 print(f"closed form 1: {b.round(2)}")
 print(f"closed form 2: {b.sum().round(2)}")
 
+
+write_to_file("./results/simplified_page_rank_scores_small_graph.txt", plot_scores)
+
+plot_the_scores(plot_scores)
 
 # # Parameter exploration of PageRank algorithm
 
 # ## Addition of teleportation probability
 
 
-def page_rank_random_surfer_model(adjacency_matrix, teleportation_probability, max_iterations=100):
+def page_rank_random_surfer_model(adjacency_matrix, teleportation_probability, max_iterations=100, threshold=0.0):
+    plot_scores = []
+
     # Initialize the PageRank scores with equal probabilities (random surfers)
     number_of_nodes = adjacency_matrix.shape[0]
     page_rank_scores = np.ones(number_of_nodes) / number_of_nodes
@@ -95,24 +129,28 @@ def page_rank_random_surfer_model(adjacency_matrix, teleportation_probability, m
     for _ in range(max_iterations):
         # Perform the matrix-vector multiplication
         new_page_rank_scores = adjacency_matrix.T.dot(page_rank_scores)
+        # new_page_rank_scores = adjacency_matrix.dot(page_rank_scores)
 
         # Add the teleportation probability
         # new_page_rank_scores = (teleportation_probability * np.ones(number_of_nodes)) + ((1 - teleportation_probability) * new_page_rank_scores)
         new_page_rank_scores = (teleportation_probability * 1 / number_of_nodes) + ((1 - teleportation_probability) * new_page_rank_scores)
         # Check for convergence
-        if np.allclose(page_rank_scores, new_page_rank_scores):
+        if np.linalg.norm(page_rank_scores - new_page_rank_scores) < threshold:
             break
 
+        plot_scores.append(page_rank_scores.round(4).tolist())
         page_rank_scores = new_page_rank_scores
 
-    return page_rank_scores
+    return page_rank_scores, plot_scores
 
 
-b = page_rank_random_surfer_model(a, 0.2)
+b, plot_scores = page_rank_random_surfer_model(a, 0.2)
 # should be 0.101351351	0.128378378	0.641891892	0.128378378
 print(b.round(2))
 print(b.sum().round(2))
 
+
+plot_the_scores(plot_scores)
 
 # ## Modified pagerank model
 
@@ -136,22 +174,23 @@ def modified_page_rank(adjacency_matrix, teleportation_probability, boredom_dist
             break
 
         page_rank_scores = new_page_rank_scores
-        return page_rank_scores
+    return page_rank_scores
 
 
-# boredom_distribution = np.array([0.25, 0.25, 0.25, 0.25])
-boredom_distribution = np.array([0.74, 0.24, 0.01, 0.01])
-b = modified_page_rank(a, 0.15, boredom_distribution)
+# boredom_distribution = np.array([0.74, 0.24, 0.01, 0.01])
+boredom_distribution = np.array([0.25, 0.25, 0.25, 0.25])
+# should be 0.101351351	0.128378378	0.641891892	0.128378378
+b = modified_page_rank(a, 0.2, boredom_distribution)
 print(b)
 print(b.sum())
 
 # ## Experimenting with teleportation probability
 
-b = page_rank_random_surfer_model(a, 0.01)
+b, _ = page_rank_random_surfer_model(a, 0.01)
 print(b.round(2))
 print(b.sum().round(2))
 
-b = page_rank_random_surfer_model(a, 0.99)
+b, _ = page_rank_random_surfer_model(a, 0.99)
 print(b.round(2))
 print(b.sum().round(2))
 
@@ -218,31 +257,41 @@ def create_adjacency_matrix(nodes, edges):
             if row_sum != 0:
                 adjacency_matrix[i][j] = row[j] / row_sum
             else:
-                adjacency_matrix[i][j] = 0.0
-
+                adjacency_matrix[i][j] = 1 / num_nodes
+                # adjacency_matrix[i][j] = 0.0
     return adjacency_matrix
 
 
 # -
 
-file_path = "./datasets/gr0.epa_sample.txt"  # Replace with the actual path to your dataset
+# file_path = './datasets/gr0.epa_sample.txt'
+# file_path = './datasets/gr0.epa_sample_dangling.txt'
+file_path = "./datasets/gr0.epa.txt"
 nodes, edges = parse_dataset(file_path)
 adjacency_matrix = create_adjacency_matrix(nodes, edges)
 
 # +
 G = nx.from_numpy_array(adjacency_matrix, create_using=nx.DiGraph)
 
-fig, ax = plt.subplots()
-pos = nx.spring_layout(G, seed=5)
-nx.draw_networkx_nodes(G, pos, ax=ax)
-nx.draw_networkx_labels(G, pos, ax=ax)
-nx.draw_networkx_edges(G, pos, ax=ax, connectionstyle=f"arc3, rad = {0.25}")
-plt.title("Graph with Edge Labels")
-plt.show()
+# fig, ax = plt.subplots()
+# pos = nx.spring_layout(G, seed=5)
+# nx.draw_networkx_nodes(G, pos, ax=ax)
+# nx.draw_networkx_labels(G, pos, ax=ax)
+# nx.draw_networkx_edges(G, pos, ax=ax, connectionstyle=f"arc3, rad = {0.25}")
+# plt.title("Graph with Edge Labels")
+# plt.show()
 # -
 
-b = page_rank_random_surfer_model(adjacency_matrix, 0.15)
-print(f"closed form 1: {b.round(2)}")
-print(f"closed form 2: {b.sum().round(2)}")
+E = np.ones(adjacency_matrix.shape[0]) / adjacency_matrix.shape[0]
+b = modified_page_rank(adjacency_matrix, 0.15, E)
+# print(f"closed form 1: {b.round(2)}")
+# print(f"closed form 2: {b.sum().round(2)}")
+print(f"closed form 1: {b}")
+print(f"closed form 2: {b.sum()}")
+
+pr = nx.pagerank(G, 0.85)
+array = np.array(list(pr.values()), dtype=float)
+print(array)
+print(array.sum())
 
 # # PageRank with parallel programming
