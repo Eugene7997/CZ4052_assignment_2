@@ -1,7 +1,7 @@
 # ---
 # jupyter:
 #   jupytext:
-#     formats: py,ipynb
+#     formats: py:light,ipynb
 #     text_representation:
 #       extension: .py
 #       format_name: light
@@ -333,13 +333,13 @@ print(f"closed form 1: {b}")
 print(f"closed form 2: {b.sum()}")
 print(f"b_no_of_iterations: {b_no_of_iterations}")
 
-# E = compute_boredom_distribution_linearly(len(nodes))
-# c, c_plot_scores, c_no_of_iterations = modified_page_rank(adjacency_matrix, 0.15, E)
-# # print(f"closed form 1: {c.round(2)}")
-# # print(f"closed form 2: {c.sum().round(2)}")
-# print(f"closed form 1: {c}")
-# print(f"closed form 2: {c.sum()}")
-# print(f"c_no_of_iterations: {c_no_of_iterations}")
+E = compute_boredom_distribution_linearly(len(nodes))
+c, c_plot_scores, c_no_of_iterations = modified_page_rank(adjacency_matrix, 0.15, E)
+# print(f"closed form 1: {c.round(2)}")
+# print(f"closed form 2: {c.sum().round(2)}")
+print(f"closed form 1: {c}")
+print(f"closed form 2: {c.sum()}")
+print(f"c_no_of_iterations: {c_no_of_iterations}")
 
 # +
 # pr = nx.pagerank(G, 0.85)
