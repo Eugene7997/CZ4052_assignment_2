@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import sys
+import time
 # np.set_printoptions(threshold=sys.maxsize)
 
 # # utility functions
@@ -223,10 +224,14 @@ def create_adjacency_matrix(nodes, edges):
 # -
 
 # file_path = './datasets/gr0.epa_sample.txt'
-# file_path = './datasets/gr0.epa_sample_dangling.txt'
-file_path = "./datasets/gr0.epa.txt"
+file_path = './datasets/gr0.epa_sample_dangling.txt'
+# file_path = "./datasets/gr0.epa.txt"
 nodes, edges = parse_dataset(file_path)
 adjacency_matrix = create_adjacency_matrix(nodes, edges)
+
+print(nodes)
+
+print(edges)
 
 # +
 G = nx.from_numpy_array(adjacency_matrix, create_using=nx.DiGraph)
@@ -341,6 +346,7 @@ print(f"closed form 1: {c}")
 print(f"closed form 2: {c.sum()}")
 print(f"c_no_of_iterations: {c_no_of_iterations}")
 
+
 # +
 # pr = nx.pagerank(G, 0.85)
 # array = np.array(list(pr.values()), dtype=float)
@@ -349,3 +355,141 @@ print(f"c_no_of_iterations: {c_no_of_iterations}")
 # -
 
 # # PageRank with parallel programming
+
+def modified_page_rank_speed_comparision(adjacency_matrix, teleportation_probability, boredom_distribution, max_iterations=100):
+    # Initialize the PageRank scores with equal probabilities (random surfers)
+    number_of_nodes = adjacency_matrix.shape[0]
+    page_rank_scores = np.ones(number_of_nodes) / number_of_nodes
+
+    print(f"initial page_rank_scores:{page_rank_scores}")
+
+    # Iteratively update the PageRank scores
+    for i in range(max_iterations):
+        # Perform the matrix-vector multiplication
+        new_page_rank_scores = adjacency_matrix.T.dot(page_rank_scores)
+
+        # Add the teleportation probability
+        new_page_rank_scores = (teleportation_probability * boredom_distribution) + ((1 - teleportation_probability) * new_page_rank_scores)
+        # Check for convergence
+        if np.allclose(page_rank_scores, new_page_rank_scores):
+            break
+
+
+        page_rank_scores = new_page_rank_scores
+
+    return page_rank_scores, i
+
+E = np.ones(adjacency_matrix.shape[0]) / adjacency_matrix.shape[0]
+start_time = time.time()
+b, _= modified_page_rank_speed_comparision(adjacency_matrix, 0.15, E)
+time_taken = time.time() - start_time
+print(f"closed form 1: {b}")
+print(f"closed form 2: {b.sum()}")
+print(f"time_taken:{time_taken}")
+
+
+# +
+# TODO: fix dangling links issue
+def map_function(nodes, edges, pagerank):
+    for node in nodes:
+        yield node, 0
+        for neighbor in edges[node]:
+            yield neighbor, pagerank[node] / len(edges[node])
+
+def reduce_function(key, values, N, E, d=0.15):
+    return key, d * E[key] + (1 - d) * sum(values) 
+
+def pagerank_mapreduce(nodes, edges, E, d=0.15, iterations=1000, tolerance=0):
+    pagerank = {node: 0 for node in nodes} 
+    new_pagerank = {node: 1/len(nodes) for node in nodes}
+    for _ in range(iterations):
+        map_output = list(map_function(nodes, edges, pagerank))
+        map_output.sort(key=lambda x: x[0])
+        i = 0
+        while i < len(map_output):
+            values = []
+            j = i
+            while j < len(map_output) and map_output[j][0] == map_output[i][0]:
+                values.append(map_output[j][1])
+                j += 1
+            node, rank = reduce_function(map_output[i][0], values, len(nodes), E, d)
+            pagerank[node] = rank
+            i = j
+        
+        diff = sum(abs(new_pagerank[node] - pagerank[node]) for node in nodes)
+        pagerank = new_pagerank
+        if diff < tolerance:
+            break
+        
+        pagerank = new_pagerank
+
+    return pagerank
+
+# Convert edges to dictionary
+edges_list = edges
+edges_dict = {node: [] for node in nodes}
+for edge in edges_list:
+    if edge[0] not in edges_dict:
+        edges_dict[edge[0]] = []
+    edges_dict[edge[0]].append(edge[1])
+
+nodes = nodes
+E = {node: 1/len(nodes) for node in nodes}  # Uniform distribution
+start_time = time.time()
+a = pagerank_mapreduce(nodes, edges_dict, E)
+time_taken = time.time() - start_time
+print(a)
+print(f"time_taken:{time_taken}")
+
+
+# +
+# Experimental for dangling links
+def map_function(nodes, edges, pagerank):
+    for node in nodes:
+        if node in edges:
+            for neighbor in edges[node]:
+                if neighbor != node:  # Skip self-loops
+                    yield neighbor, pagerank[node] / len(edges[node])
+        yield node, 0  # Ensure every node gets at least some rank (even if it's just 0)
+
+def reduce_function(key, values, N, E, d=0.15):
+    return key, d * E[key] + (1 - d) * sum(values)
+
+def pagerank_mapreduce(nodes, edges, E, d=0.15, iterations=1000, tolerance=0):
+    pagerank = {node: 1/len(nodes) for node in nodes}
+    for _ in range(iterations):
+        new_pagerank = {node: 0 for node in nodes}
+        map_output = list(map_function(nodes, edges, pagerank))
+        map_output.sort(key=lambda x: x[0])
+        i = 0
+        dangling_nodes_rank = 0
+        while i < len(map_output):
+            values = []
+            j = i
+            while j < len(map_output) and map_output[j][0] == map_output[i][0]:
+                values.append(map_output[j][1])
+                j += 1
+            node, rank = reduce_function(map_output[i][0], values, len(nodes), E, d)
+            if node not in edges or not edges[node]:  # Check if the node is a dangling node
+                dangling_nodes_rank += rank
+            else:
+                new_pagerank[node] = rank
+            i = j
+        for node in new_pagerank:
+            new_pagerank[node] += dangling_nodes_rank / len(nodes)  # Distribute the rank of dangling nodes
+        diff = sum(abs(new_pagerank[node] - pagerank[node]) for node in nodes)
+        if diff < tolerance:
+            break
+        pagerank = new_pagerank
+    return pagerank
+nodes = nodes
+E = {node: 1/len(nodes) for node in nodes}  # Uniform distribution
+start_time = time.time()
+a = pagerank_mapreduce(nodes, edges_dict, E)
+time_taken = time.time() - start_time
+print(a)
+print(sum(a.values()))
+print(f"time_taken:{time_taken}")
+# -
+
+
