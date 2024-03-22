@@ -223,8 +223,8 @@ def create_adjacency_matrix(nodes, edges):
 
 # -
 
-# file_path = './datasets/gr0.epa_sample.txt'
-file_path = './datasets/gr0.epa_sample_dangling.txt'
+file_path = './datasets/gr0.epa_sample.txt'
+# file_path = './datasets/gr0.epa_sample_dangling.txt'
 # file_path = "./datasets/gr0.epa.txt"
 nodes, edges = parse_dataset(file_path)
 adjacency_matrix = create_adjacency_matrix(nodes, edges)
@@ -439,57 +439,150 @@ start_time = time.time()
 a = pagerank_mapreduce(nodes, edges_dict, E)
 time_taken = time.time() - start_time
 print(a)
+print(sum(a.values()))
 print(f"time_taken:{time_taken}")
 
 
 # +
-# Experimental for dangling links
-def map_function(nodes, edges, pagerank):
-    for node in nodes:
-        if node in edges:
-            for neighbor in edges[node]:
-                if neighbor != node:  # Skip self-loops
-                    yield neighbor, pagerank[node] / len(edges[node])
-        yield node, 0  # Ensure every node gets at least some rank (even if it's just 0)
+def pagerank_mapper(webpage, outlinks, pagerank_values):
+    for outlink in outlinks:
+        yield outlink, pagerank_values[webpage] / len(outlinks)
+    yield webpage, outlinks
 
-def reduce_function(key, values, N, E, d=0.15):
-    return key, d * E[key] + (1 - d) * sum(values)
+def pagerank_reducer(webpage, values, damping_factor, total_webpages):
+    outlink_list = []
+    pagerank = 0
+    for value in values:
+        if isinstance(value, list):
+            outlink_list.extend(value)
+        else:
+            pagerank += value
+    new_pagerank = damping_factor * pagerank + (1 - damping_factor) / total_webpages
+    return new_pagerank
 
-def pagerank_mapreduce(nodes, edges, E, d=0.15, iterations=1000, tolerance=0):
-    pagerank = {node: 1/len(nodes) for node in nodes}
-    for _ in range(iterations):
-        new_pagerank = {node: 0 for node in nodes}
-        map_output = list(map_function(nodes, edges, pagerank))
-        map_output.sort(key=lambda x: x[0])
-        i = 0
-        dangling_nodes_rank = 0
-        while i < len(map_output):
-            values = []
-            j = i
-            while j < len(map_output) and map_output[j][0] == map_output[i][0]:
-                values.append(map_output[j][1])
-                j += 1
-            node, rank = reduce_function(map_output[i][0], values, len(nodes), E, d)
-            if node not in edges or not edges[node]:  # Check if the node is a dangling node
-                dangling_nodes_rank += rank
-            else:
-                new_pagerank[node] = rank
-            i = j
-        for node in new_pagerank:
-            new_pagerank[node] += dangling_nodes_rank / len(nodes)  # Distribute the rank of dangling nodes
-        diff = sum(abs(new_pagerank[node] - pagerank[node]) for node in nodes)
-        if diff < tolerance:
+def map_reduce(input_data, mapper, reducer, max_iterations=10, convergence_threshold=1e-6, damping_factor=0.85):
+    # Initialize an empty dictionary to store intermediate results
+    pagerank_values = {webpage: 1.0 / len(input_data) for webpage in input_data}
+
+    for iteration in range(max_iterations):
+        new_pagerank_values = {}
+        intermediate_results = {}  # Clear intermediate results for each iteration
+        for webpage, outlinks in input_data.items():
+            mapped_pairs = mapper(webpage, outlinks, pagerank_values)
+            for key, value in mapped_pairs:
+                if key not in intermediate_results:
+                    intermediate_results[key] = []
+                intermediate_results[key].append(value)
+
+        for key, values in intermediate_results.items():
+            reduced_value = reducer(key, values, damping_factor, len(input_data))
+            new_pagerank_values[key] = reduced_value
+
+        # Check for convergence
+        convergence = sum(abs(new_pagerank_values[node] - pagerank_values[node]) for node in input_data.keys()) < convergence_threshold
+        if convergence:
             break
-        pagerank = new_pagerank
-    return pagerank
-nodes = nodes
-E = {node: 1/len(nodes) for node in nodes}  # Uniform distribution
-start_time = time.time()
-a = pagerank_mapreduce(nodes, edges_dict, E)
-time_taken = time.time() - start_time
-print(a)
-print(sum(a.values()))
-print(f"time_taken:{time_taken}")
-# -
 
+        pagerank_values = new_pagerank_values
+
+    return pagerank_values
+
+# Input data (replace with your actual link structure)
+input_data = {
+    'webpage1': ['webpage2', 'webpage3'],
+    'webpage2': ['webpage1'],
+    'webpage3': ['webpage2', 'webpage1'],
+    # 'webpage4': []
+}
+damping_factor = 0.85
+
+# Run MapReduce job
+pagerank_results = map_reduce(input_data, pagerank_mapper, pagerank_reducer, damping_factor=damping_factor)
+print(pagerank_results)
+print(sum(pagerank_results.values()))
+
+# +
+import numpy as np
+
+# a = np.array([[0, 1, 1, 0], [1, 0, 0, 0], [1, 1, 0, 0], [0, 0, 0, 0]])
+a = np.array([[0, 1, 1], [1, 0, 0], [1, 1, 0]])
+G = nx.from_numpy_array(a, create_using=nx.DiGraph)
+nx.pagerank(G, 0.85)
+
+
+# +
+def pagerank_mapper(webpage, outlinks, pagerank_values):
+    # Emit the webpage with an empty list if it's a dangling node
+    if not outlinks:
+        yield webpage, []
+    for outlink in outlinks:
+        yield outlink, pagerank_values[webpage] / len(outlinks)
+
+
+def pagerank_reducer(webpage, values, damping_factor, total_webpages):
+    outlink_list = []
+    pagerank = 0
+    for value in values:
+        if isinstance(value, list):
+            outlink_list.extend(value)
+        else:
+            pagerank += value
+    
+    # Handle dangling nodes by redistributing their PageRank evenly
+    if not outlink_list:
+        pagerank += damping_factor * pagerank / total_webpages
+    
+    new_pagerank = damping_factor * pagerank + (1 - damping_factor) / total_webpages
+    return new_pagerank
+
+def map_reduce(input_data, mapper, reducer, max_iterations=1000, convergence_threshold=1e-6, damping_factor=0.85):
+    pagerank_values = {webpage: 1.0 / len(input_data) for webpage in input_data}
+    print(pagerank_values)
+    for iteration in range(max_iterations):
+        new_pagerank_values = {}
+        intermediate_results = {}
+        for webpage, outlinks in input_data.items():
+            mapped_pairs = mapper(webpage, outlinks, pagerank_values)
+            for key, value in mapped_pairs:
+                if key not in intermediate_results:
+                    intermediate_results[key] = []
+                intermediate_results[key].append(value)
+
+        for key, values in intermediate_results.items():
+            reduced_value = reducer(key, values, damping_factor, len(input_data))
+            new_pagerank_values[key] = reduced_value
+
+        convergence = sum(abs(new_pagerank_values[node] - pagerank_values[node]) for node in input_data.keys()) < convergence_threshold
+
+        if convergence:
+            break
+
+        pagerank_values = new_pagerank_values
+
+    return pagerank_values
+
+# Input data (replace with your actual link structure)
+input_data = {
+    'webpage1': ['webpage2', 'webpage3'],
+    'webpage2': ['webpage1'],
+    'webpage3': ['webpage2', 'webpage4'],
+    'webpage4': []
+    # 'webpage4': ['webpage1', 'webpage2', 'webpage3', 'webpage4']
+}
+damping_factor = 0.85
+
+# Run MapReduce job
+pagerank_results = map_reduce(input_data, pagerank_mapper, pagerank_reducer, convergence_threshold=0, damping_factor=damping_factor)
+print(pagerank_results)
+print(sum(pagerank_results.values()))
+
+
+# +
+import numpy as np
+
+a = np.array([[0, 1, 1, 0], [1, 0, 0, 0], [1, 1, 0, 0], [0, 0, 0, 0]])
+G = nx.from_numpy_array(a, create_using=nx.DiGraph)
+b = nx.pagerank(G, 0.85)
+print(b)
+print(sum(b.values()))
 
