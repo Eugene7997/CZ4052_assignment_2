@@ -220,18 +220,25 @@ def create_adjacency_matrix(nodes, edges):
 
     return adjacency_matrix
 
+def create_adjacency_list(nodes, edges):
+    adjacency_list = {node: [] for node in nodes}
+
+    for edge in edges:
+        source, destination = edge
+        adjacency_list[source].append(destination)
+
+    return adjacency_list
+
+
 
 # -
 
-file_path = './datasets/gr0.epa_sample.txt'
-# file_path = './datasets/gr0.epa_sample_dangling.txt'
+# file_path = './datasets/gr0.epa_sample.txt'
+file_path = './datasets/gr0.epa_sample_dangling.txt'
 # file_path = "./datasets/gr0.epa.txt"
 nodes, edges = parse_dataset(file_path)
 adjacency_matrix = create_adjacency_matrix(nodes, edges)
-
-print(nodes)
-
-print(edges)
+adjacency_list = create_adjacency_list(nodes, edges)
 
 # +
 G = nx.from_numpy_array(adjacency_matrix, create_using=nx.DiGraph)
@@ -488,12 +495,7 @@ def map_reduce(input_data, mapper, reducer, max_iterations=10, convergence_thres
     return pagerank_values
 
 # Input data (replace with your actual link structure)
-input_data = {
-    'webpage1': ['webpage2', 'webpage3'],
-    'webpage2': ['webpage1'],
-    'webpage3': ['webpage2', 'webpage1'],
-    # 'webpage4': []
-}
+input_data = adjacency_list
 damping_factor = 0.85
 
 # Run MapReduce job
@@ -509,6 +511,10 @@ a = np.array([[0, 1, 1], [1, 0, 0], [1, 1, 0]])
 G = nx.from_numpy_array(a, create_using=nx.DiGraph)
 nx.pagerank(G, 0.85)
 
+
+# -
+
+# ## Experimenting
 
 # +
 def pagerank_mapper(webpage, outlinks, pagerank_values):
@@ -530,13 +536,14 @@ def pagerank_reducer(webpage, values, damping_factor, total_webpages):
     
     # Handle dangling nodes by redistributing their PageRank evenly
     if not outlink_list:
-        pagerank += damping_factor * pagerank / total_webpages
+        pagerank += damping_factor * pagerank / (total_webpages-1)
     
     new_pagerank = damping_factor * pagerank + (1 - damping_factor) / total_webpages
     return new_pagerank
 
 def map_reduce(input_data, mapper, reducer, max_iterations=1000, convergence_threshold=1e-6, damping_factor=0.85):
-    pagerank_values = {webpage: 1.0 / len(input_data) for webpage in input_data}
+    # pagerank_values = {webpage: 1.0 / len(input_data) for webpage in input_data}
+    pagerank_values = {webpage: 1.0 for webpage in input_data}
     print(pagerank_values)
     for iteration in range(max_iterations):
         new_pagerank_values = {}
@@ -552,6 +559,9 @@ def map_reduce(input_data, mapper, reducer, max_iterations=1000, convergence_thr
             reduced_value = reducer(key, values, damping_factor, len(input_data))
             new_pagerank_values[key] = reduced_value
 
+        total_pagerank = sum(new_pagerank_values.values())
+        new_pagerank_values = {webpage: pagerank / total_pagerank for webpage, pagerank in new_pagerank_values.items()}
+        
         convergence = sum(abs(new_pagerank_values[node] - pagerank_values[node]) for node in input_data.keys()) < convergence_threshold
 
         if convergence:
@@ -562,27 +572,20 @@ def map_reduce(input_data, mapper, reducer, max_iterations=1000, convergence_thr
     return pagerank_values
 
 # Input data (replace with your actual link structure)
-input_data = {
-    'webpage1': ['webpage2', 'webpage3'],
-    'webpage2': ['webpage1'],
-    'webpage3': ['webpage2', 'webpage4'],
-    'webpage4': []
-    # 'webpage4': ['webpage1', 'webpage2', 'webpage3', 'webpage4']
-}
+input_data = adjacency_list
 damping_factor = 0.85
 
 # Run MapReduce job
 pagerank_results = map_reduce(input_data, pagerank_mapper, pagerank_reducer, convergence_threshold=0, damping_factor=damping_factor)
-print(pagerank_results)
-print(sum(pagerank_results.values()))
+print(f"pagerank results:\n {pagerank_results}")
+print(f"sum of page ranks: {sum(pagerank_results.values())}")
 
 
 # +
 import numpy as np
 
-a = np.array([[0, 1, 1, 0], [1, 0, 0, 0], [1, 1, 0, 0], [0, 0, 0, 0]])
+a = adjacency_matrix
 G = nx.from_numpy_array(a, create_using=nx.DiGraph)
 b = nx.pagerank(G, 0.85)
-print(b)
-print(sum(b.values()))
-
+print(f"pagerank results:\n {b}")
+print(f"sum of page ranks: {sum(b.values())}")
