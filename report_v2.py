@@ -198,25 +198,24 @@ def parse_dataset(file_path):
 
     return nodes, edges
 
-# def create_adjacency_matrix(nodes, edges):
-#     num_nodes = max(nodes) + 1
-#     adjacency_matrix = np.zeros((num_nodes, num_nodes))
+def create_adjacency_matrix_replace_dead_nodes(nodes, edges):
+    num_nodes = max(nodes) + 1
+    adjacency_matrix = np.zeros((num_nodes, num_nodes))
 
-#     for edge in edges:
-#         adjacency_matrix[edge[0]][edge[1]] = 1
+    for edge in edges:
+        adjacency_matrix[edge[0]][edge[1]] = 1
 
-#     for i in range(len(adjacency_matrix)):
-#         row = adjacency_matrix[i]
-#         row_sum = sum(row)
+    for i in range(len(adjacency_matrix)):
+        row = adjacency_matrix[i]
+        row_sum = sum(row)
 
-#         for j in range(len(row)):
-#             # Avoid division by zero
-#             if row_sum != 0:
-#                 adjacency_matrix[i][j] = row[j] / row_sum
-#             else:
-#                 adjacency_matrix[i][j] = 1 / num_nodes
+        for j in range(len(row)):
+            if row_sum != 0:
+                adjacency_matrix[i][j] = row[j] / row_sum
+            else:
+                adjacency_matrix[i][j] = 1 / num_nodes
 
-#     return adjacency_matrix, None
+    return adjacency_matrix, None
 
 def create_adjacency_matrix_drop_dangling(nodes, edges):
     num_nodes = max(nodes) + 1
@@ -266,9 +265,9 @@ def create_adjacency_list(nodes, edges):
 
 # file_path = './datasets/gr0.epa_sample.txt'
 # file_path = './datasets/gr0.epa_sample_dangling.txt'
-# file_path = "./datasets/gr0.epa.txt"
+file_path = "./datasets/gr0.epa.txt"
 # file_path = "./datasets/lecture_example.txt"
-file_path = "./datasets/input.txt"
+# file_path = "./datasets/input.txt"
 nodes, edges = parse_dataset(file_path)
 
 adjacency_matrix, dropped_nodes = create_adjacency_matrix_drop_dangling(nodes, edges)
@@ -434,87 +433,64 @@ print(f"closed form 1: {b}")
 print(f"closed form 2: {b.sum()}")
 print(f"time_taken:{time_taken}")
 
-
 # ## Experimenting
 
 # +
-def pagerank_mapper(webpage, outlinks, pagerank_values):
-    # Emit the webpage with an empty list if it's a dangling node
-    if not outlinks:
-        yield webpage, []
-    for outlink in outlinks:
-        yield outlink, pagerank_values[webpage] / len(outlinks)
+from multiprocessing import Pool
+import numpy as np
 
-def pagerank_reducer(webpage, values, damping_factor, total_webpages):
-    outlink_list = []
-    pagerank = 0
-    for value in values:
-        if isinstance(value, list):
-            outlink_list.extend(value)
-        else:
-            pagerank += value
-    
-    # Handle dangling nodes by redistributing their PageRank evenly
-    if not outlink_list:
-        pagerank += damping_factor * pagerank / (total_webpages-1)
-    
-    new_pagerank = damping_factor * pagerank + (1 - damping_factor) / total_webpages
-    return new_pagerank
+def matrix_vector_multiply(args):
+    adjacency_row, page_rank_scores = args
+    return adjacency_row.dot(page_rank_scores)
 
-def map_reduce(input_data, mapper, reducer, max_iterations=1000, convergence_threshold=1e-6, damping_factor=0.85):
-    # pagerank_values = {webpage: 1.0 / len(input_data) for webpage in input_data}
-    pagerank_values = {webpage: 1.0 for webpage in input_data}
-    # new_pagerank_values = {key: 0.0 for key in input_data.keys()}
-    # new_pagerank_values = {webpage: 1.0 for webpage in input_data}
+def modified_page_rank(adjacency_matrix, teleportation_probability, boredom_distribution, max_iterations=100):
+    plot_scores = []
 
-    for iteration in range(max_iterations):
-        intermediate_results = {}
-        new_pagerank_values = {}
-        
-        for webpage, outlinks in input_data.items():
-            mapped_pairs = mapper(webpage, outlinks, pagerank_values)
-            for key, value in mapped_pairs:
-                if key not in intermediate_results:
-                    intermediate_results[key] = []
-                intermediate_results[key].append(value)
+    # Initialize the PageRank scores with equal probabilities (random surfers)
+    number_of_nodes = adjacency_matrix.shape[0]
+    page_rank_scores = np.ones(number_of_nodes) / number_of_nodes
 
-        for key, values in intermediate_results.items():
-            reduced_value = reducer(key, values, damping_factor, len(input_data))
-            new_pagerank_values[key] = reduced_value
+    print(f"initial page_rank_scores:{page_rank_scores}")
 
-        # Handle dangling nodes
-        for webpage in input_data.keys():
-            if webpage not in new_pagerank_values:
-                new_pagerank_values[webpage] = damping_factor / len(input_data)
-    
-        total_pagerank = sum(new_pagerank_values.values())
-        new_pagerank_values = {webpage: pagerank / total_pagerank for webpage, pagerank in new_pagerank_values.items()}
-        
-        # convergence = sum(abs(new_pagerank_values[node] - pagerank_values[node]) for node in input_data.keys()) < convergence_threshold
-        convergence = all(abs((new_pagerank_values[node] - pagerank_values[node]) / pagerank_values[node]) < convergence_threshold for node in input_data.keys())
+    # Iteratively update the PageRank scores
+    for i in range(max_iterations):
+        # Create a pool of workers
+        pool = Pool()
 
-        if convergence:
-            print(f"convergence reached at iteration {iteration}")
+        # Perform the matrix-vector multiplication in parallel
+        new_page_rank_scores = pool.map(matrix_vector_multiply, [(row, page_rank_scores) for row in adjacency_matrix.T])
+
+        # Close the pool
+        pool.close()
+        pool.join()
+
+        # Convert the list of results to numpy array
+        new_page_rank_scores = np.array(new_page_rank_scores)
+
+        # Add the teleportation probability
+        new_page_rank_scores = (teleportation_probability * boredom_distribution) + ((1 - teleportation_probability) * new_page_rank_scores)
+
+        # Check for convergence
+        if np.allclose(page_rank_scores, new_page_rank_scores):
             break
 
-        pagerank_values = new_pagerank_values
+        plot_scores.append(page_rank_scores.tolist())
 
-    return pagerank_values
+        page_rank_scores = new_page_rank_scores
 
-input_data = adjacency_list
-damping_factor = 0.85
+    return page_rank_scores, plot_scores, i
 
-# Run MapReduce job
-pagerank_results = map_reduce(input_data, pagerank_mapper, pagerank_reducer, convergence_threshold=0, damping_factor=damping_factor)
-print(f"pagerank results:\n {pagerank_results}")
-print(f"sum of page ranks: {sum(pagerank_results.values())}")
+E = np.ones(adjacency_matrix.shape[0]) / adjacency_matrix.shape[0]
+start_time = time.time()
+b, _= modified_page_rank(adjacency_matrix, 0.15, E)
+time_taken = time.time() - start_time
+print(f"closed form 1: {b}")
+print(f"closed form 2: {b.sum()}")
+print(f"time_taken:{time_taken}")
 # -
 
 
-b = nx.pagerank(G, 0.85)
-print(f"pagerank results:\n {b}")
-print(f"sum of page ranks: {sum(b.values())}")
-
-index = 14
-print(b[index])
-print(pagerank_results[index])
+pr = nx.pagerank(G, 0.85)
+array = np.array(list(pr.values()), dtype=float)
+print(array)
+print(array.sum())
